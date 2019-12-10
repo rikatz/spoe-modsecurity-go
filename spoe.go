@@ -5,6 +5,7 @@ import (
 	"net"
 	"os"
 	"unsafe"
+	
 
 	"github.com/negasus/haproxy-spoe-go/action"
 	"github.com/negasus/haproxy-spoe-go/agent"
@@ -136,8 +137,7 @@ func handler(req *request.Request) {
 	}
 
 	log.Printf("METHOD: %s", method)
-	// unique-id method path query req.ver req.hdrs_bin req.body_size req.body
-
+	
 	path, ok := mes.KV.Get("path")
 	if !ok {
 		log.Printf("Path field not found")
@@ -145,13 +145,40 @@ func handler(req *request.Request) {
 	}
 	log.Printf("path: %s", path)
 
+	url, ok := mes.KV.Get("url")
+	if !ok {
+		log.Printf("url field not found")
+		return
+	}
+
+	log.Printf("url: %s", url)
+
+	var urlValue string
+	urlValue, ok = url.(string)
+
+	if !ok {
+		log.Printf("Could not find a valid URI")
+		return
+	}
+
 	query, ok := mes.KV.Get("query")
 	if !ok {
 		log.Printf("Query field not found")
 		return
 	}
+	
+	var queryStr string
+	queryStr, ok = query.(string)
+	if !ok {
+		queryStr = ""
+	}
 
-	log.Printf("query: %s", query)
+
+	if len(queryStr) > 0 {
+		urlValue = urlValue + "?" + queryStr
+	}
+	log.Printf("Full Query: %s", urlValue)
+	
 
 	reqver, ok := mes.KV.Get("reqver")
 	if !ok {
@@ -179,7 +206,7 @@ func handler(req *request.Request) {
 	modsec := C.msc_init()
 	defer C.free(unsafe.Pointer(modsec))
 
-	conninfo := C.CString("ModSecurity-test v0.0.1-alpha (Simple example on how to use ModSecurity API")
+	conninfo := C.CString("Mod-security SPOE agent")
 	defer C.free(unsafe.Pointer(conninfo))
 	C.msc_set_connector_info(modsec, conninfo)
 
@@ -199,19 +226,28 @@ func handler(req *request.Request) {
 
 	transaction = C.msc_new_transaction(modsec, rules, nil)
 
-	ret = C.msc_process_connection(transaction, C.CString(ip.String()), 12345, C.CString("127.0.0.1"), 80)
+	ret = C.msc_process_connection(transaction, C.CString(ip.String()), 12345, C.CString("127.0.0.5"), 80)
 	if ret < 1 {
 		log.Fatalf("Error processing conection: %d", int(ret))
 	}
 
-	C.msc_process_uri(transaction, C.CString("http://www.modsecurity.org/../etc/passwd"), C.CString(method.(string)), C.CString(reqver.(string)))
+	C.msc_process_uri(transaction, C.CString(urlValue), C.CString(method.(string)), C.CString(reqver.(string)))
 
 	//TODO: How to convert String to C uchar??
 	/*for k, v := range headers {
 		C.msc_add_request_header(transaction, C.CString([]uint8(k)), C.CString([]uint8(v)))
 	}*/
 
+    C.msc_process_request_headers(transaction);
+    C.msc_process_request_body(transaction);
+	// THIS IS WHAT CAUSES INTERVENTION - TEST WITH OTHER CASES!!
+	//C.msc_process_response_headers(transaction, 200, C.CString("HTTP 1.!"));
+    C.msc_process_response_body(transaction);
+
+
 	ret = C.checkTransaction(transaction)
+
+	// TODO: There's a need to free every transaction, and this should be done somewhere here (or into defer)
 
 	log.Printf("Intervetion: %d", int(ret))
 	req.Actions.SetVar(action.ScopeSession, "ip_score", 1)
