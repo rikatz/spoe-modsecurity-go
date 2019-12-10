@@ -225,6 +225,8 @@ func handler(req *request.Request) {
 	defer C.free(unsafe.Pointer(transaction))
 
 	transaction = C.msc_new_transaction(modsec, rules, nil)
+	defer C.msc_transaction_cleanup(transaction);
+
 
 	ret = C.msc_process_connection(transaction, C.CString(ip.String()), 12345, C.CString("127.0.0.5"), 80)
 	if ret < 1 {
@@ -233,7 +235,8 @@ func handler(req *request.Request) {
 
 	C.msc_process_uri(transaction, C.CString(urlValue), C.CString(method.(string)), C.CString(reqver.(string)))
 
-	//TODO: How to convert String to C uchar??
+	// TODO: Not parsing headers
+	// How to convert String to C uchar??
 	/*for k, v := range headers {
 		C.msc_add_request_header(transaction, C.CString([]uint8(k)), C.CString([]uint8(v)))
 	}*/
@@ -244,12 +247,12 @@ func handler(req *request.Request) {
 	//C.msc_process_response_headers(transaction, 200, C.CString("HTTP 1.!"));
     C.msc_process_response_body(transaction);
 
+	C.msc_process_logging(transaction);
 
-	ret = C.checkTransaction(transaction)
+	intervention := C.checkTransaction(transaction)
 
-	// TODO: There's a need to free every transaction, and this should be done somewhere here (or into defer)
 
-	log.Printf("Intervetion: %d", int(ret))
-	req.Actions.SetVar(action.ScopeSession, "ip_score", 1)
+	log.Printf("Intervetion: %d", int(intervention))
+	req.Actions.SetVar(action.ScopeTransaction, "sec_score", int(intervention))
 
 }
